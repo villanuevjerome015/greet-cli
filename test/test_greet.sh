@@ -18,6 +18,7 @@ assert_eq() {
 }
 
 assert_eq "Hello, Alice!" "$(greet Alice)" "greets a given name"
+assert_eq "Hello, World!" "$(greet)" "defaults to World when no name is given"
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
