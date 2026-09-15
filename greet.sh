@@ -2,7 +2,7 @@
 # greet.sh - build a friendly greeting message.
 
 greet() {
-  local name="$1"
+  local name="${1:-}"
   if [ -z "$name" ]; then
     name="World"
   fi
