@@ -1,0 +1,560 @@
+{
+  "name": "Job Application Automation (NXTGen VA Solutions)",
+  "nodes": [
+    {
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "adzuna-search",
+      "name": "Adzuna Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 100],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.adzuna.com/v1/api/jobs/{{$env.ADZUNA_COUNTRY}}/search/1",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "app_id", "value": "={{$env.ADZUNA_APP_ID}}" },
+            { "name": "app_key", "value": "={{$env.ADZUNA_APP_KEY}}" },
+            { "name": "what", "value": "={{$env.TARGET_JOB_QUERY}}" },
+            { "name": "where", "value": "={{$env.TARGET_JOB_LOCATION}}" },
+            { "name": "results_per_page", "value": "50" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "extract-adzuna",
+      "name": "Extract: Adzuna",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 100],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json;\nconst jobs = body.results || [];\n\nreturn jobs.map((job) => ({\n  json: {\n    source: 'adzuna',\n    raw: job,\n  },\n}));"
+      }
+    },
+    {
+      "id": "jsearch-search",
+      "name": "JSearch Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "https://jsearch.p.rapidapi.com/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "query", "value": "={{$env.TARGET_JOB_QUERY + ' in ' + $env.TARGET_JOB_LOCATION}}" },
+            { "name": "page", "value": "1" },
+            { "name": "num_pages", "value": "1" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-RapidAPI-Key", "value": "={{$env.RAPIDAPI_KEY}}" },
+            { "name": "X-RapidAPI-Host", "value": "jsearch.p.rapidapi.com" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "extract-jsearch",
+      "name": "Extract: JSearch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json;\nconst jobs = body.data || [];\n\nreturn jobs.map((job) => ({\n  json: {\n    source: 'jsearch',\n    raw: job,\n  },\n}));"
+      }
+    },
+    {
+      "id": "fetch-ats-jobs",
+      "name": "Fetch ATS Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 500],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Edit this list, or replace with an Airtable \"Target Companies\" lookup later.\nconst TARGET_COMPANIES = [\n  // { company: 'stripe', ats: 'greenhouse' },\n  // { company: 'netflix', ats: 'lever' },\n];\n\nconst results = [];\n\nfor (const target of TARGET_COMPANIES) {\n  const { company, ats } = target;\n  let url;\n\n  if (ats === 'greenhouse') {\n    url = `https://boards-api.greenhouse.io/v1/boards/${company}/jobs?content=true`;\n  } else if (ats === 'lever') {\n    url = `https://api.lever.co/v0/postings/${company}?mode=json`;\n  } else if (ats === 'ashby') {\n    url = `https://api.ashbyhq.com/posting-api/job-board/${company}`;\n  } else {\n    continue;\n  }\n\n  let response;\n  try {\n    response = await this.helpers.httpRequest({\n      method: 'GET',\n      url,\n      json: true,\n      ignoreHttpStatusErrors: true,\n    });\n  } catch (err) {\n    continue;\n  }\n\n  if (!response) continue;\n\n  if (ats === 'greenhouse') {\n    for (const job of response.jobs || []) {\n      results.push({ json: { source: 'greenhouse', company, raw: job } });\n    }\n  } else if (ats === 'lever') {\n    const jobs = Array.isArray(response) ? response : [];\n    for (const job of jobs) {\n      results.push({ json: { source: 'lever', company, raw: job } });\n    }\n  } else if (ats === 'ashby') {\n    for (const job of response.jobs || []) {\n      results.push({ json: { source: 'ashby', company, raw: job } });\n    }\n  }\n}\n\nreturn results;"
+      }
+    },
+    {
+      "id": "merge-sources-1",
+      "name": "Merge Sources 1",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [660, 200],
+      "parameters": {
+        "mode": "append"
+      }
+    },
+    {
+      "id": "merge-sources-2",
+      "name": "Merge Sources 2",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [880, 350],
+      "parameters": {
+        "mode": "append"
+      }
+    },
+    {
+      "id": "normalize-jobs",
+      "name": "Normalize Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 350],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function normalizeAdzuna(raw) {\n  return {\n    title: raw.title || '',\n    company: raw.company?.display_name || '',\n    location: raw.location?.display_name || '',\n    url: raw.redirect_url || '',\n    description: raw.description || '',\n    posted_at: raw.created || '',\n  };\n}\n\nfunction normalizeJSearch(raw) {\n  const location = [raw.job_city, raw.job_state, raw.job_country].filter(Boolean).join(', ');\n  return {\n    title: raw.job_title || '',\n    company: raw.employer_name || '',\n    location: location || (raw.job_is_remote ? 'Remote' : ''),\n    url: raw.job_apply_link || raw.job_google_link || '',\n    description: raw.job_description || '',\n    posted_at: raw.job_posted_at_datetime_utc || '',\n  };\n}\n\nfunction normalizeGreenhouse(raw, company) {\n  return {\n    title: raw.title || '',\n    company,\n    location: raw.location?.name || '',\n    url: raw.absolute_url || '',\n    description: raw.content || '',\n    posted_at: raw.updated_at || '',\n  };\n}\n\nfunction normalizeLever(raw, company) {\n  return {\n    title: raw.text || '',\n    company,\n    location: raw.categories?.location || '',\n    url: raw.hostedUrl || '',\n    description: raw.descriptionPlain || raw.description || '',\n    posted_at: raw.createdAt ? new Date(Number(raw.createdAt)).toISOString() : '',\n  };\n}\n\nfunction normalizeAshby(raw, company) {\n  return {\n    title: raw.title || '',\n    company,\n    location: raw.location || '',\n    url: raw.jobUrl || raw.applyUrl || '',\n    description: raw.descriptionPlain || raw.description || '',\n    posted_at: raw.publishedAt || '',\n  };\n}\n\nconst output = [];\n\nfor (const item of $input.all()) {\n  const { source, company, raw } = item.json;\n  let normalized;\n\n  switch (source) {\n    case 'adzuna': normalized = normalizeAdzuna(raw); break;\n    case 'jsearch': normalized = normalizeJSearch(raw); break;\n    case 'greenhouse': normalized = normalizeGreenhouse(raw, company); break;\n    case 'lever': normalized = normalizeLever(raw, company); break;\n    case 'ashby': normalized = normalizeAshby(raw, company); break;\n    default: continue;\n  }\n\n  if (!normalized.title || !normalized.company || !normalized.url) continue;\n\n  output.push({ json: { ...normalized, source } });\n}\n\nreturn output;"
+      }
+    },
+    {
+      "id": "compute-dedupe-hash",
+      "name": "Compute Dedupe Hash",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 350],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const crypto = require('crypto');\n\nreturn $input.all().map((item) => {\n  const { company, title, location } = item.json;\n\n  const key = [company, title, location]\n    .map((v) => String(v || '').trim().toLowerCase())\n    .join('|');\n\n  const dedupe_hash = crypto.createHash('sha256').update(key).digest('hex');\n\n  return { json: { ...item.json, dedupe_hash } };\n});"
+      }
+    },
+    {
+      "id": "airtable-get-existing-hashes",
+      "name": "Airtable: Get Existing Hashes",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1540, 350],
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{$env.AIRTABLE_BASE_ID}}"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{$env.AIRTABLE_APPLICATIONS_TABLE}}"
+        },
+        "options": {
+          "fields": ["Job ID"]
+        }
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "PLACEHOLDER",
+          "name": "Airtable account"
+        }
+      }
+    },
+    {
+      "id": "filter-new-jobs",
+      "name": "Filter New Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 350],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const existingHashes = new Set(\n  $('Airtable: Get Existing Hashes')\n    .all()\n    .map((item) => item.json['Job ID'])\n    .filter(Boolean)\n);\n\nreturn $input.all().filter((item) => !existingHashes.has(item.json.dedupe_hash));"
+      }
+    },
+    {
+      "id": "anthropic-fit-score",
+      "name": "Anthropic - Fit Score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1980, 350],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{$env.ANTHROPIC_API_KEY}}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { model: \"claude-sonnet-5\", max_tokens: 300, system: \"You score how well a candidate fits a job posting, 0-100. Return ONLY compact JSON like {\\\"score\\\": 82, \\\"reason\\\": \\\"one sentence\\\"}. No markdown fencing, no extra text.\", messages: [ { role: \"user\", content: \"CANDIDATE PROFILE:\\n\" + $env.CANDIDATE_PROFILE + \"\\n\\nJOB TITLE: \" + $json.title + \"\\nCOMPANY: \" + $json.company + \"\\nJOB DESCRIPTION:\\n\" + ($json.description || \"\").slice(0, 4000) } ] } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "parse-fit-score",
+      "name": "Parse Fit Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 350],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const response = $input.item.json;\nconst text = response.content?.[0]?.text || '';\n\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (err) {\n  const match = text.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : { score: 0, reason: 'Could not parse model output' };\n}\n\nconst job = $('Filter New Jobs').item.json;\n\nreturn {\n  json: {\n    ...job,\n    fit_score: Number(parsed.score) || 0,\n    fit_reason: String(parsed.reason || '').slice(0, 500),\n  },\n};"
+      }
+    },
+    {
+      "id": "if-score-70",
+      "name": "IF: Score >= 70",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2420, 350],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.fit_score}}",
+              "rightValue": 70,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "anthropic-cover-letter",
+      "name": "Anthropic - Cover Letter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, 250],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{$env.ANTHROPIC_API_KEY}}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { model: \"claude-sonnet-5\", max_tokens: 500, system: \"You write cover letters. Direct, specific, no corporate filler. 200 words max. Never invent experience not in the candidate profile.\", messages: [ { role: \"user\", content: \"<candidate_profile>\" + $env.CANDIDATE_PROFILE + \"</candidate_profile>\\n<job_description>\" + ($json.description || \"\").slice(0, 4000) + \"</job_description>\\n<company>\" + $json.company + \"</company>\\n\\nExtract the 3 requirements this employer clearly cares most about.\\nMap each to specific evidence from the candidate profile.\\nIf a requirement has no honest match, do not address it.\\nOutput only the letter body.\" } ] } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "attach-cover-letter",
+      "name": "Attach Cover Letter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2860, 250],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const response = $input.item.json;\nconst letter = response.content?.[0]?.text?.trim() || '';\nconst job = $('Parse Fit Score').item.json;\n\nreturn {\n  json: {\n    ...job,\n    cover_letter: letter,\n    status: 'pending',\n  },\n};"
+      }
+    },
+    {
+      "id": "mark-skipped",
+      "name": "Mark Skipped",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2640, 470],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const job = $('Parse Fit Score').item.json;\n\nreturn {\n  json: {\n    ...job,\n    cover_letter: '',\n    status: 'skipped',\n  },\n};"
+      }
+    },
+    {
+      "id": "merge-before-write",
+      "name": "Merge Before Write",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [3080, 350],
+      "parameters": {
+        "mode": "append"
+      }
+    },
+    {
+      "id": "airtable-create-application-row",
+      "name": "Airtable: Create Application Row",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [3300, 350],
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{$env.AIRTABLE_BASE_ID}}"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{$env.AIRTABLE_APPLICATIONS_TABLE}}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Job ID": "={{$json.dedupe_hash}}",
+            "Title": "={{$json.title}}",
+            "Company": "={{$json.company}}",
+            "Location": "={{$json.location}}",
+            "URL": "={{$json.url}}",
+            "Description": "={{($json.description || '').slice(0, 10000)}}",
+            "Source": "={{$json.source}}",
+            "Posted At": "={{$json.posted_at}}",
+            "Fit Score": "={{$json.fit_score}}",
+            "Fit Reason": "={{$json.fit_reason}}",
+            "Cover Letter": "={{$json.cover_letter}}",
+            "Status": "={{$json.status}}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "PLACEHOLDER",
+          "name": "Airtable account"
+        }
+      }
+    },
+    {
+      "id": "if-status-pending",
+      "name": "IF: Status Pending",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3520, 350],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.status}}",
+              "rightValue": "pending",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "aggregate-for-digest",
+      "name": "Aggregate for Digest",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [3740, 250],
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "data"
+      }
+    },
+    {
+      "id": "if-has-passing-jobs",
+      "name": "IF: Has Passing Jobs",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3960, 250],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.data.length}}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "build-digest-message",
+      "name": "Build Digest Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4180, 170],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const jobs = $input.first().json.data || [];\n\nif (jobs.length === 0) {\n  return [{ json: { digest_text: '' } }];\n}\n\nconst lines = jobs.map((job, i) => {\n  return [\n    `*${i + 1}. ${job.title}* — ${job.company}`,\n    `   Fit: ${job.fit_score}/100 — ${job.fit_reason}`,\n    `   ${job.location || 'Location not listed'} | ${job.source}`,\n    `   <${job.url}|Open posting>`,\n  ].join('\\n');\n});\n\nconst digest_text = [\n  `*${jobs.length} new application${jobs.length === 1 ? '' : 's'} ready for review* :inbox_tray:`,\n  '',\n  ...lines,\n  '',\n  'Cover letters are drafted and rows are logged as `pending` in Airtable. Review, then submit.',\n].join('\\n');\n\nreturn [{ json: { digest_text, job_count: jobs.length } }];"
+      }
+    },
+    {
+      "id": "slack-post-digest",
+      "name": "Slack: Post Digest",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [4400, 170],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{$env.SLACK_CHANNEL_ID}}"
+        },
+        "text": "={{$json.digest_text}}",
+        "otherOptions": {}
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "PLACEHOLDER",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "id": "no-op-1",
+      "name": "No Op (skipped only)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [3740, 450],
+      "parameters": {}
+    },
+    {
+      "id": "no-op-2",
+      "name": "No Op (nothing to digest)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [4180, 330],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          { "node": "Adzuna Search", "type": "main", "index": 0 },
+          { "node": "JSearch Search", "type": "main", "index": 0 },
+          { "node": "Fetch ATS Jobs", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Adzuna Search": {
+      "main": [[{ "node": "Extract: Adzuna", "type": "main", "index": 0 }]]
+    },
+    "Extract: Adzuna": {
+      "main": [[{ "node": "Merge Sources 1", "type": "main", "index": 0 }]]
+    },
+    "JSearch Search": {
+      "main": [[{ "node": "Extract: JSearch", "type": "main", "index": 0 }]]
+    },
+    "Extract: JSearch": {
+      "main": [[{ "node": "Merge Sources 1", "type": "main", "index": 1 }]]
+    },
+    "Merge Sources 1": {
+      "main": [[{ "node": "Merge Sources 2", "type": "main", "index": 0 }]]
+    },
+    "Fetch ATS Jobs": {
+      "main": [[{ "node": "Merge Sources 2", "type": "main", "index": 1 }]]
+    },
+    "Merge Sources 2": {
+      "main": [[{ "node": "Normalize Jobs", "type": "main", "index": 0 }]]
+    },
+    "Normalize Jobs": {
+      "main": [[{ "node": "Compute Dedupe Hash", "type": "main", "index": 0 }]]
+    },
+    "Compute Dedupe Hash": {
+      "main": [[{ "node": "Airtable: Get Existing Hashes", "type": "main", "index": 0 }]]
+    },
+    "Airtable: Get Existing Hashes": {
+      "main": [[{ "node": "Filter New Jobs", "type": "main", "index": 0 }]]
+    },
+    "Filter New Jobs": {
+      "main": [[{ "node": "Anthropic - Fit Score", "type": "main", "index": 0 }]]
+    },
+    "Anthropic - Fit Score": {
+      "main": [[{ "node": "Parse Fit Score", "type": "main", "index": 0 }]]
+    },
+    "Parse Fit Score": {
+      "main": [[{ "node": "IF: Score >= 70", "type": "main", "index": 0 }]]
+    },
+    "IF: Score >= 70": {
+      "main": [
+        [{ "node": "Anthropic - Cover Letter", "type": "main", "index": 0 }],
+        [{ "node": "Mark Skipped", "type": "main", "index": 0 }]
+      ]
+    },
+    "Anthropic - Cover Letter": {
+      "main": [[{ "node": "Attach Cover Letter", "type": "main", "index": 0 }]]
+    },
+    "Attach Cover Letter": {
+      "main": [[{ "node": "Merge Before Write", "type": "main", "index": 0 }]]
+    },
+    "Mark Skipped": {
+      "main": [[{ "node": "Merge Before Write", "type": "main", "index": 1 }]]
+    },
+    "Merge Before Write": {
+      "main": [[{ "node": "Airtable: Create Application Row", "type": "main", "index": 0 }]]
+    },
+    "Airtable: Create Application Row": {
+      "main": [[{ "node": "IF: Status Pending", "type": "main", "index": 0 }]]
+    },
+    "IF: Status Pending": {
+      "main": [
+        [{ "node": "Aggregate for Digest", "type": "main", "index": 0 }],
+        [{ "node": "No Op (skipped only)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aggregate for Digest": {
+      "main": [[{ "node": "IF: Has Passing Jobs", "type": "main", "index": 0 }]]
+    },
+    "IF: Has Passing Jobs": {
+      "main": [
+        [{ "node": "Build Digest Message", "type": "main", "index": 0 }],
+        [{ "node": "No Op (nothing to digest)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Digest Message": {
+      "main": [[{ "node": "Slack: Post Digest", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
