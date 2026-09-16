@@ -15,10 +15,16 @@ else, fill out `candidate-profile-template.md` instead and point
 Every 6 hours:
 1. Pulls job listings from **Adzuna**, **JSearch (RapidAPI)**, and public
    **Greenhouse/Lever/Ashby** board endpoints for a hardcoded list of target
-   companies — no browser automation, no LinkedIn/Indeed scraping.
+   companies — no browser automation, no LinkedIn/Indeed scraping. Adzuna and
+   JSearch each run once per entry in `TARGET_JOB_QUERIES` (e.g. ops, PM,
+   automation), since neither API's query syntax handles real OR well enough
+   to cover multiple role families in one call.
 2. Normalizes all three shapes into one schema.
 3. Hashes `company + title + location` and drops anything already logged in
-   Airtable, so re-runs don't re-process the same posting.
+   Airtable, so re-runs don't re-process the same posting — and drops
+   duplicates within the same run too, since a posting can legitimately match
+   more than one role query (e.g. "operations manager" and "automation
+   specialist" both hitting the same listing).
 4. Sends each new job + the candidate profile to Claude for a 0–100 fit score.
    Anything under 70 gets logged as `skipped` and stops there — no letter, no
    wasted Anthropic call.
@@ -41,7 +47,7 @@ Every 6 hours:
 | `candidate-profile-template.md` | Blank template — fill this out for a different candidate; feeds both Anthropic calls. |
 | `code-nodes/*.js` | Same code as the workflow's Code nodes, kept as standalone files so you can review/diff them outside the n8n UI. |
 | `airtable-schema.md` | Table/field definitions. Build this in Airtable before importing the workflow. |
-| `.env.example` | Every variable the workflow reads via `{{$env.VAR_NAME}}`. |
+| `.env.example` | Every variable the workflow reads via `{{$env.VAR_NAME}}`, including `TARGET_JOB_QUERIES` (comma-separated role list). |
 
 ## Setup steps
 

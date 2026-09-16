@@ -19,11 +19,22 @@
       }
     },
     {
+      "id": "role-queries",
+      "name": "Role Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [150, 200],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// One item per role-family query, so Adzuna/JSearch each run once per\n// role instead of one query string trying to cover ops + PM + automation.\n// Edit TARGET_JOB_QUERIES (comma-separated) in .env to add/remove roles.\nconst queries = ($env.TARGET_JOB_QUERIES || 'operations manager')\n  .split(',')\n  .map((q) => q.trim())\n  .filter(Boolean);\n\nreturn queries.map((query) => ({ json: { query } }));"
+      }
+    },
+    {
       "id": "adzuna-search",
       "name": "Adzuna Search",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [220, 100],
+      "position": [370, 100],
       "parameters": {
         "method": "GET",
         "url": "=https://api.adzuna.com/v1/api/jobs/{{$env.ADZUNA_COUNTRY}}/search/1",
@@ -32,7 +43,7 @@
           "parameters": [
             { "name": "app_id", "value": "={{$env.ADZUNA_APP_ID}}" },
             { "name": "app_key", "value": "={{$env.ADZUNA_APP_KEY}}" },
-            { "name": "what", "value": "={{$env.TARGET_JOB_QUERY}}" },
+            { "name": "what", "value": "={{$json.query}}" },
             { "name": "where", "value": "={{$env.TARGET_JOB_LOCATION}}" },
             { "name": "results_per_page", "value": "50" },
             { "name": "content-type", "value": "application/json" }
@@ -46,10 +57,10 @@
       "name": "Extract: Adzuna",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [440, 100],
+      "position": [590, 100],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const body = $input.first().json;\nconst jobs = body.results || [];\n\nreturn jobs.map((job) => ({\n  json: {\n    source: 'adzuna',\n    raw: job,\n  },\n}));"
+        "jsCode": "// Runs once per role query (see \"Role Queries\"), so this must flatten\n// every input item's results, not just the first.\nconst output = [];\n\nfor (const item of $input.all()) {\n  const jobs = item.json.results || [];\n  for (const job of jobs) {\n    output.push({ json: { source: 'adzuna', raw: job } });\n  }\n}\n\nreturn output;"
       }
     },
     {
@@ -57,14 +68,14 @@
       "name": "JSearch Search",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [220, 300],
+      "position": [370, 300],
       "parameters": {
         "method": "GET",
         "url": "https://jsearch.p.rapidapi.com/search",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
-            { "name": "query", "value": "={{$env.TARGET_JOB_QUERY + ' in ' + $env.TARGET_JOB_LOCATION}}" },
+            { "name": "query", "value": "={{$json.query + ' in ' + $env.TARGET_JOB_LOCATION}}" },
             { "name": "page", "value": "1" },
             { "name": "num_pages", "value": "1" }
           ]
@@ -84,10 +95,10 @@
       "name": "Extract: JSearch",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [440, 300],
+      "position": [590, 300],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const body = $input.first().json;\nconst jobs = body.data || [];\n\nreturn jobs.map((job) => ({\n  json: {\n    source: 'jsearch',\n    raw: job,\n  },\n}));"
+        "jsCode": "// Runs once per role query (see \"Role Queries\"), so this must flatten\n// every input item's results, not just the first.\nconst output = [];\n\nfor (const item of $input.all()) {\n  const jobs = item.json.data || [];\n  for (const job of jobs) {\n    output.push({ json: { source: 'jsearch', raw: job } });\n  }\n}\n\nreturn output;"
       }
     },
     {
@@ -180,7 +191,7 @@
       "position": [1760, 350],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const existingHashes = new Set(\n  $('Airtable: Get Existing Hashes')\n    .all()\n    .map((item) => item.json['Job ID'])\n    .filter(Boolean)\n);\n\nreturn $input.all().filter((item) => !existingHashes.has(item.json.dedupe_hash));"
+        "jsCode": "const existingHashes = new Set(\n  $('Airtable: Get Existing Hashes')\n    .all()\n    .map((item) => item.json['Job ID'])\n    .filter(Boolean)\n);\n\n// Multiple role queries (ops/PM/automation) can surface the same posting\n// in one run — dedupe against Airtable AND within this run's own items.\nconst seenThisRun = new Set();\nconst output = [];\n\nfor (const item of $input.all()) {\n  const hash = item.json.dedupe_hash;\n  if (existingHashes.has(hash) || seenThisRun.has(hash)) continue;\n  seenThisRun.add(hash);\n  output.push(item);\n}\n\nreturn output;"
       }
     },
     {
@@ -465,9 +476,16 @@
     "Schedule Trigger": {
       "main": [
         [
-          { "node": "Adzuna Search", "type": "main", "index": 0 },
-          { "node": "JSearch Search", "type": "main", "index": 0 },
+          { "node": "Role Queries", "type": "main", "index": 0 },
           { "node": "Fetch ATS Jobs", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Role Queries": {
+      "main": [
+        [
+          { "node": "Adzuna Search", "type": "main", "index": 0 },
+          { "node": "JSearch Search", "type": "main", "index": 0 }
         ]
       ]
     },

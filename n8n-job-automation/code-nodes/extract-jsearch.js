@@ -1,14 +1,16 @@
 // Node: "Extract: JSearch"
 // Mode: Run Once for All Items
-// Splits the single JSearch (RapidAPI) response (one item holding a `data` array)
-// into one n8n item per job, tagged with its source.
+// JSearch Search now runs once per role query (see "Role Queries"), so this
+// gets one input item per query, each holding a `data` array. Flatten all
+// of them into one n8n item per job, tagged with its source.
 
-const body = $input.first().json;
-const jobs = body.data || [];
+const output = [];
 
-return jobs.map((job) => ({
-  json: {
-    source: 'jsearch',
-    raw: job,
-  },
-}));
+for (const item of $input.all()) {
+  const jobs = item.json.data || [];
+  for (const job of jobs) {
+    output.push({ json: { source: 'jsearch', raw: job } });
+  }
+}
+
+return output;
