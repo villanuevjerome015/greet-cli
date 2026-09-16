@@ -1,9 +1,14 @@
 # Job Application Automation — n8n Workflow
 
-Job-seeker side: applies to roles on behalf of a candidate/client. Everything up
-to "Submit" is automated; a human (VA) submits. Full-auto only where the employer's
+Job-seeker side: applies to roles on behalf of a candidate. Everything up
+to "Submit" is automated; a human submits. Full-auto only where the employer's
 own ATS accepts API submissions — this build doesn't attempt that yet (see
 "What's not built" below).
+
+This copy is configured for Jerome Villanueva's own job search (ops / PM / AI
+automation roles) — see `candidate-profile-jerome.md`. To run it for someone
+else, fill out `candidate-profile-template.md` instead and point
+`CANDIDATE_PROFILE` at that.
 
 ## What this does
 
@@ -32,7 +37,8 @@ Every 6 hours:
 | File | Purpose |
 |---|---|
 | `workflow.json` | Import directly into n8n (Workflows → Import from File). |
-| `candidate-profile-template.md` | Fill this out per candidate; feeds both Anthropic calls. |
+| `candidate-profile-jerome.md` | Filled profile for Jerome's own search, sourced from his resume. Use as-is unless something's out of date. |
+| `candidate-profile-template.md` | Blank template — fill this out for a different candidate; feeds both Anthropic calls. |
 | `code-nodes/*.js` | Same code as the workflow's Code nodes, kept as standalone files so you can review/diff them outside the n8n UI. |
 | `airtable-schema.md` | Table/field definitions. Build this in Airtable before importing the workflow. |
 | `.env.example` | Every variable the workflow reads via `{{$env.VAR_NAME}}`. |
@@ -48,8 +54,10 @@ Every 6 hours:
    - JSearch: https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
    - Anthropic: https://console.anthropic.com/
 
-3. **Fill out `candidate-profile-template.md`** with real numbers, then copy
-   the result into `CANDIDATE_PROFILE` in your `.env` (or n8n Cloud Variables).
+3. **Copy `candidate-profile-jerome.md`'s content into `CANDIDATE_PROFILE`**
+   in your `.env` (or n8n Cloud Variables). Running this for someone else
+   instead? Fill out `candidate-profile-template.md` with real numbers and use
+   that.
 
 4. **Copy `.env.example` to `.env`** and fill in the rest. Where these actually
    live depends on your n8n setup:
