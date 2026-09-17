@@ -63,6 +63,19 @@ function normalizeAshby(raw, company) {
   };
 }
 
+// Careers-page jobs arrive already extracted by the model, so this is a
+// pass-through. posted_at is left blank — careers pages rarely state it.
+function normalizeCareersPage(raw, company) {
+  return {
+    title: raw.title || '',
+    company,
+    location: raw.location || '',
+    url: raw.url || '',
+    description: raw.description || '',
+    posted_at: '',
+  };
+}
+
 const output = [];
 
 for (const item of $input.all()) {
@@ -84,6 +97,9 @@ for (const item of $input.all()) {
       break;
     case 'ashby':
       normalized = normalizeAshby(raw, company);
+      break;
+    case 'careers_page':
+      normalized = normalizeCareersPage(raw, company);
       break;
     default:
       continue;

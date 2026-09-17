@@ -138,6 +138,51 @@
       }
     },
     {
+      "id": "fetch-careers-pages",
+      "name": "Fetch Careers Pages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 680],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Employer careers pages to watch, for companies that don't use a\n// supported ATS. Add ONLY pages you have checked are OK to read\n// automatically: visit thesite.com/robots.txt and skim their terms for\n// \"automated\", \"scraping\", \"crawl\".\n//\n// Do NOT put large commercial job boards here (JobStreet, Indeed,\n// LinkedIn, etc.) — their terms ban automated collection and they run bot\n// detection, so it is the same ToS/ban risk this project ruled out on\n// day one.\nconst CAREERS_PAGES = [\n  // { company: 'Example VA Agency', url: 'https://example.com/careers' },\n];\n\nconst results = [];\n\nfor (const page of CAREERS_PAGES) {\n  let html;\n  try {\n    html = await this.helpers.httpRequest({\n      method: 'GET',\n      url: page.url,\n      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobWatcher/1.0)' },\n      ignoreHttpStatusErrors: true,\n    });\n  } catch (err) {\n    continue;\n  }\n\n  if (typeof html !== 'string' || !html.trim()) continue;\n\n  const text = html\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/\\s+/g, ' ')\n    .trim()\n    .slice(0, 6000);\n\n  // Too little text usually means the listings are rendered by JavaScript,\n  // which a plain fetch can't see. Skip rather than send junk to the model.\n  if (text.length < 100) continue;\n\n  results.push({ json: { company: page.company, url: page.url, page_text: text } });\n}\n\nreturn results;"
+      }
+    },
+    {
+      "id": "anthropic-extract-jobs",
+      "name": "Anthropic - Extract Jobs from Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 680],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{$('Config').first().json.anthropic_api_key}}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { model: \"claude-sonnet-5\", max_tokens: 2000, system: \"You extract job postings from the text of a careers page. Return ONLY a JSON array, no markdown fencing, no commentary. Each element: {\\\"title\\\": \\\"\\\", \\\"location\\\": \\\"\\\", \\\"description\\\": \\\"\\\", \\\"url\\\": \\\"\\\"}. Use an empty string when a value is not stated on the page — never invent one. If the page lists no open roles, return [].\", messages: [ { role: \"user\", content: \"COMPANY: \" + $json.company + \"\\nPAGE URL: \" + $json.url + \"\\nPAGE TEXT:\\n\" + $json.page_text } ] } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "parse-extracted-jobs",
+      "name": "Parse Extracted Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 680],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const responses = $input.all();\nconst pages = $('Fetch Careers Pages').all();\nconst output = [];\n\nfor (let i = 0; i < responses.length; i++) {\n  const text = responses[i].json.content?.[0]?.text || '';\n  const page = pages[i]?.json || {};\n\n  let jobs;\n  try {\n    jobs = JSON.parse(text);\n  } catch (err) {\n    const match = text.match(/\\[[\\s\\S]*\\]/);\n    try {\n      jobs = match ? JSON.parse(match[0]) : [];\n    } catch (err2) {\n      jobs = [];\n    }\n  }\n\n  if (!Array.isArray(jobs)) continue;\n\n  for (const job of jobs) {\n    if (!job || !job.title) continue;\n    output.push({\n      json: {\n        source: 'careers_page',\n        company: page.company || '',\n        raw: {\n          title: job.title,\n          location: job.location || '',\n          description: job.description || '',\n          url: job.url || page.url || '',\n        },\n      },\n    });\n  }\n}\n\nreturn output;"
+      }
+    },
+    {
       "id": "merge-sources-1",
       "name": "Merge Sources 1",
       "type": "n8n-nodes-base.merge",
@@ -158,6 +203,16 @@
       }
     },
     {
+      "id": "merge-sources-3",
+      "name": "Merge Sources 3",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [990, 520],
+      "parameters": {
+        "mode": "append"
+      }
+    },
+    {
       "id": "normalize-jobs",
       "name": "Normalize Jobs",
       "type": "n8n-nodes-base.code",
@@ -165,7 +220,7 @@
       "position": [1100, 350],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "function normalizeAdzuna(raw) {\n  return {\n    title: raw.title || '',\n    company: raw.company?.display_name || '',\n    location: raw.location?.display_name || '',\n    url: raw.redirect_url || '',\n    description: raw.description || '',\n    posted_at: raw.created || '',\n  };\n}\n\nfunction normalizeJSearch(raw) {\n  const location = [raw.job_city, raw.job_state, raw.job_country].filter(Boolean).join(', ');\n  return {\n    title: raw.job_title || '',\n    company: raw.employer_name || '',\n    location: location || (raw.job_is_remote ? 'Remote' : ''),\n    url: raw.job_apply_link || raw.job_google_link || '',\n    description: raw.job_description || '',\n    posted_at: raw.job_posted_at_datetime_utc || '',\n  };\n}\n\nfunction normalizeGreenhouse(raw, company) {\n  return {\n    title: raw.title || '',\n    company,\n    location: raw.location?.name || '',\n    url: raw.absolute_url || '',\n    description: raw.content || '',\n    posted_at: raw.updated_at || '',\n  };\n}\n\nfunction normalizeLever(raw, company) {\n  return {\n    title: raw.text || '',\n    company,\n    location: raw.categories?.location || '',\n    url: raw.hostedUrl || '',\n    description: raw.descriptionPlain || raw.description || '',\n    posted_at: raw.createdAt ? new Date(Number(raw.createdAt)).toISOString() : '',\n  };\n}\n\nfunction normalizeAshby(raw, company) {\n  return {\n    title: raw.title || '',\n    company,\n    location: raw.location || '',\n    url: raw.jobUrl || raw.applyUrl || '',\n    description: raw.descriptionPlain || raw.description || '',\n    posted_at: raw.publishedAt || '',\n  };\n}\n\nconst output = [];\n\nfor (const item of $input.all()) {\n  const { source, company, raw } = item.json;\n  let normalized;\n\n  switch (source) {\n    case 'adzuna': normalized = normalizeAdzuna(raw); break;\n    case 'jsearch': normalized = normalizeJSearch(raw); break;\n    case 'greenhouse': normalized = normalizeGreenhouse(raw, company); break;\n    case 'lever': normalized = normalizeLever(raw, company); break;\n    case 'ashby': normalized = normalizeAshby(raw, company); break;\n    default: continue;\n  }\n\n  if (!normalized.title || !normalized.company || !normalized.url) continue;\n\n  output.push({ json: { ...normalized, source } });\n}\n\nreturn output;"
+        "jsCode": "function normalizeAdzuna(raw) {\n  return {\n    title: raw.title || '',\n    company: raw.company?.display_name || '',\n    location: raw.location?.display_name || '',\n    url: raw.redirect_url || '',\n    description: raw.description || '',\n    posted_at: raw.created || '',\n  };\n}\n\nfunction normalizeJSearch(raw) {\n  const location = [raw.job_city, raw.job_state, raw.job_country].filter(Boolean).join(', ');\n  return {\n    title: raw.job_title || '',\n    company: raw.employer_name || '',\n    location: location || (raw.job_is_remote ? 'Remote' : ''),\n    url: raw.job_apply_link || raw.job_google_link || '',\n    description: raw.job_description || '',\n    posted_at: raw.job_posted_at_datetime_utc || '',\n  };\n}\n\nfunction normalizeGreenhouse(raw, company) {\n  return {\n    title: raw.title || '',\n    company,\n    location: raw.location?.name || '',\n    url: raw.absolute_url || '',\n    description: raw.content || '',\n    posted_at: raw.updated_at || '',\n  };\n}\n\nfunction normalizeLever(raw, company) {\n  return {\n    title: raw.text || '',\n    company,\n    location: raw.categories?.location || '',\n    url: raw.hostedUrl || '',\n    description: raw.descriptionPlain || raw.description || '',\n    posted_at: raw.createdAt ? new Date(Number(raw.createdAt)).toISOString() : '',\n  };\n}\n\nfunction normalizeAshby(raw, company) {\n  return {\n    title: raw.title || '',\n    company,\n    location: raw.location || '',\n    url: raw.jobUrl || raw.applyUrl || '',\n    description: raw.descriptionPlain || raw.description || '',\n    posted_at: raw.publishedAt || '',\n  };\n}\n\n// Careers-page jobs arrive already extracted by the model, so this is a\n// pass-through. posted_at is left blank — careers pages rarely state it.\nfunction normalizeCareersPage(raw, company) {\n  return {\n    title: raw.title || '',\n    company,\n    location: raw.location || '',\n    url: raw.url || '',\n    description: raw.description || '',\n    posted_at: '',\n  };\n}\n\nconst output = [];\n\nfor (const item of $input.all()) {\n  const { source, company, raw } = item.json;\n  let normalized;\n\n  switch (source) {\n    case 'adzuna': normalized = normalizeAdzuna(raw); break;\n    case 'jsearch': normalized = normalizeJSearch(raw); break;\n    case 'greenhouse': normalized = normalizeGreenhouse(raw, company); break;\n    case 'lever': normalized = normalizeLever(raw, company); break;\n    case 'ashby': normalized = normalizeAshby(raw, company); break;\n    case 'careers_page': normalized = normalizeCareersPage(raw, company); break;\n    default: continue;\n  }\n\n  if (!normalized.title || !normalized.company || !normalized.url) continue;\n\n  output.push({ json: { ...normalized, source } });\n}\n\nreturn output;"
       }
     },
     {
@@ -505,9 +560,19 @@
       "main": [
         [
           { "node": "Role Queries", "type": "main", "index": 0 },
-          { "node": "Fetch ATS Jobs", "type": "main", "index": 0 }
+          { "node": "Fetch ATS Jobs", "type": "main", "index": 0 },
+          { "node": "Fetch Careers Pages", "type": "main", "index": 0 }
         ]
       ]
+    },
+    "Fetch Careers Pages": {
+      "main": [[{ "node": "Anthropic - Extract Jobs from Page", "type": "main", "index": 0 }]]
+    },
+    "Anthropic - Extract Jobs from Page": {
+      "main": [[{ "node": "Parse Extracted Jobs", "type": "main", "index": 0 }]]
+    },
+    "Parse Extracted Jobs": {
+      "main": [[{ "node": "Merge Sources 3", "type": "main", "index": 1 }]]
     },
     "Role Queries": {
       "main": [
@@ -536,6 +601,9 @@
       "main": [[{ "node": "Merge Sources 2", "type": "main", "index": 1 }]]
     },
     "Merge Sources 2": {
+      "main": [[{ "node": "Merge Sources 3", "type": "main", "index": 0 }]]
+    },
+    "Merge Sources 3": {
       "main": [[{ "node": "Normalize Jobs", "type": "main", "index": 0 }]]
     },
     "Normalize Jobs": {

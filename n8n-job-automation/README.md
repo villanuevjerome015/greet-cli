@@ -13,12 +13,20 @@ the `candidate_profile` field on the workflow's **Config** node.
 ## What this does
 
 Every 6 hours:
-1. Pulls job listings from **Adzuna**, **JSearch (RapidAPI)**, and public
-   **Greenhouse/Lever/Ashby** board endpoints for a hardcoded list of target
-   companies — no browser automation, no LinkedIn/Indeed scraping. Adzuna and
-   JSearch each run once per entry in the Config node's `target_job_queries`
-   field (e.g. ops, PM, automation), since neither API's query syntax handles
-   real OR well enough to cover multiple role families in one call.
+1. Pulls job listings from four kinds of source — no browser automation, no
+   LinkedIn/Indeed scraping:
+   - **Adzuna** and **JSearch (RapidAPI)**, each run once per entry in the
+     Config node's `target_job_queries` field (e.g. ops, PM, automation),
+     since neither API's query syntax handles real OR well enough to cover
+     multiple role families in one call. (JSearch reads Google for Jobs, so
+     LinkedIn/Indeed *listings* do surface here legitimately — you just
+     apply on those sites yourself.)
+   - public **Greenhouse/Lever/Ashby** board endpoints for a list of target
+     companies, set in the `Fetch ATS Jobs` node.
+   - **employer careers pages** for companies with no supported ATS, set in
+     the `Fetch Careers Pages` node — the page is fetched, stripped to text,
+     and read by Claude to pull out postings. See the warning under that
+     node before adding sites.
 2. Normalizes all three shapes into one schema.
 3. Hashes `company + title + location` and drops anything already logged in
    Airtable, so re-runs don't re-process the same posting — and drops
@@ -88,7 +96,20 @@ Every 6 hours:
    board, e.g. `boards.greenhouse.io/stripe` → `stripe`). Leave it empty to
    run on Adzuna + JSearch only.
 
-7. **Test with the schedule trigger disabled first.** Click "Execute Workflow"
+7. **Optionally add careers pages.** For companies whose "Apply" link does
+   *not* go to Greenhouse/Lever/Ashby, open the `Fetch Careers Pages` Code
+   node and add `{ company, url }` entries. Read the rules in that node's
+   comments first — in short: employer careers pages only, check
+   `thesite.com/robots.txt` and their terms before adding, and never add a
+   commercial job board (JobStreet, Indeed, LinkedIn and the like), which
+   carries the same ToS and ban risk this project ruled out on day one.
+
+   Two practical limits: pages that render their listings with JavaScript
+   come back nearly empty from a plain fetch and get skipped, and each page
+   costs one extra Claude call per run (cents at this volume, but it scales
+   with the number of sites).
+
+8. **Test with the schedule trigger disabled first.** Click "Execute Workflow"
    manually, watch it run node-by-node, confirm a row lands in Airtable and a
    message lands in Slack before you turn on the 6-hour schedule.
 
