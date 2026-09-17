@@ -7,8 +7,8 @@ own ATS accepts API submissions — this build doesn't attempt that yet (see
 
 This copy is configured for Jerome Villanueva's own job search (ops / PM / AI
 automation roles) — see `candidate-profile-jerome.md`. To run it for someone
-else, fill out `candidate-profile-template.md` instead and point
-`CANDIDATE_PROFILE` at that.
+else, fill out `candidate-profile-template.md` instead and paste that into
+the `candidate_profile` field on the workflow's **Config** node.
 
 ## What this does
 
@@ -16,9 +16,9 @@ Every 6 hours:
 1. Pulls job listings from **Adzuna**, **JSearch (RapidAPI)**, and public
    **Greenhouse/Lever/Ashby** board endpoints for a hardcoded list of target
    companies — no browser automation, no LinkedIn/Indeed scraping. Adzuna and
-   JSearch each run once per entry in `TARGET_JOB_QUERIES` (e.g. ops, PM,
-   automation), since neither API's query syntax handles real OR well enough
-   to cover multiple role families in one call.
+   JSearch each run once per entry in the Config node's `target_job_queries`
+   field (e.g. ops, PM, automation), since neither API's query syntax handles
+   real OR well enough to cover multiple role families in one call.
 2. Normalizes all three shapes into one schema.
 3. Hashes `company + title + location` and drops anything already logged in
    Airtable, so re-runs don't re-process the same posting — and drops
@@ -47,7 +47,7 @@ Every 6 hours:
 | `candidate-profile-template.md` | Blank template — fill this out for a different candidate; feeds both Anthropic calls. |
 | `code-nodes/*.js` | Same code as the workflow's Code nodes, kept as standalone files so you can review/diff them outside the n8n UI. |
 | `airtable-schema.md` | Table/field definitions. Build this in Airtable before importing the workflow. |
-| `.env.example` | Every variable the workflow reads via `{{$env.VAR_NAME}}`, including `TARGET_JOB_QUERIES` (comma-separated role list). |
+| `.env.example` | Reference checklist of every value the workflow needs — where you actually enter each one is explained inside the file. |
 
 ## Setup steps
 
@@ -60,25 +60,27 @@ Every 6 hours:
    - JSearch: https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
    - Anthropic: https://console.anthropic.com/
 
-3. **Copy `candidate-profile-jerome.md`'s content into `CANDIDATE_PROFILE`**
-   in your `.env` (or n8n Cloud Variables). Running this for someone else
-   instead? Fill out `candidate-profile-template.md` with real numbers and use
-   that.
+3. **Import `workflow.json`** into n8n (Workflows → `...` → Import from File,
+   or a new workflow's `...` menu).
 
-4. **Copy `.env.example` to `.env`** and fill in the rest. Where these actually
-   live depends on your n8n setup:
-   - Self-hosted (Docker/npm): real process environment variables.
-   - n8n Cloud: use the built-in **Variables** feature instead — Cloud
-     restricts arbitrary `$env` access. Same variable names, different storage.
-   *(Assumption: I built this assuming one of those two setups. If you're on
-   something else, the `{{$env.X}}` expressions are the only thing that'd
-   need to change.)*
+4. **Set up n8n credentials** for Airtable and Slack (double-click each node,
+   Credential dropdown → Create new). The workflow references credentials
+   named "Airtable account" and "Slack account" — n8n will flag them as
+   unlinked on import; that's normal, just create/select them there.
 
-5. **Set up n8n credentials** for Airtable and Slack (Settings → Credentials).
-   The workflow JSON references credentials named "Airtable account" and
-   "Slack account" — after import, open the two Airtable nodes and the Slack
-   node and point each at your real credential (n8n will flag them as
-   unlinked on import; this is normal for a shared template).
+5. **Open the "Config" node** (near the start of the canvas, right after
+   Schedule Trigger) and fill in its fields directly: API keys, your Airtable
+   Base ID and table name, your Slack channel ID, the candidate profile
+   (paste `candidate-profile-jerome.md`'s content in), and your search
+   settings. Every other node reads from this one node — it's the only
+   place you need to touch to configure this workflow.
+   *(Why a Config node instead of n8n's env vars/Variables: most n8n Cloud
+   plans, including trials, don't expose a Variables screen and block
+   arbitrary `$env` access. A single Set node with plain fields works on
+   every plan, self-hosted or Cloud, so that's what this ships with. If
+   you're on a plan/self-host that does support Variables, you can swap
+   these fields back to `{{$env.X}}` or `{{$vars.X}}` yourself — `.env.example`
+   still lists every value either way.)*
 
 6. **Edit the target-company list.** Open the `Fetch ATS Jobs` Code node and
    fill in `TARGET_COMPANIES` with the Greenhouse/Lever/Ashby board slugs you
@@ -86,20 +88,18 @@ Every 6 hours:
    board, e.g. `boards.greenhouse.io/stripe` → `stripe`). Leave it empty to
    run on Adzuna + JSearch only.
 
-7. **Import `workflow.json`** into n8n, fix the credential links from step 5,
-   activate the workflow.
-
-8. **Test with the schedule trigger disabled first.** Click "Execute Workflow"
+7. **Test with the schedule trigger disabled first.** Click "Execute Workflow"
    manually, watch it run node-by-node, confirm a row lands in Airtable and a
    message lands in Slack before you turn on the 6-hour schedule.
 
 ## What's not built (scope calls, not oversights)
 
-- **Multi-candidate support.** This workflow runs one `CANDIDATE_PROFILE` at a
-  time. Running it for multiple clients means duplicating the workflow per
-  client (separate env vars + Airtable base) or extending it to pull the
-  active profile from a `Candidates` table — noted in `airtable-schema.md`,
-  not built here since you didn't specify multi-client in the brief.
+- **Multi-candidate support.** This workflow runs one candidate profile at a
+  time (set on the Config node). Running it for multiple clients means
+  duplicating the workflow per client (separate Config + Airtable base) or
+  extending it to pull the active profile from a `Candidates` table — noted
+  in `airtable-schema.md`, not built here since you didn't specify
+  multi-client in the brief.
 - **Direct ATS API submission** (the Greenhouse/Lever/Ashby "full auto"
   exception from your brief). This build only *reads* those boards for
   listings; wiring up actual submission would be employer-specific (which

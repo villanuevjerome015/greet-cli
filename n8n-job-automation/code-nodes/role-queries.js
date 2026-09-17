@@ -1,11 +1,12 @@
 // Node: "Role Queries"
 // Mode: Run Once for All Items
-// Sits between Schedule Trigger and Adzuna/JSearch. Fans out one item per
+// Sits between Config and Adzuna/JSearch. Fans out one item per
 // role-family query, so each source node runs once per role instead of one
 // query string trying (and failing) to cover ops + PM + automation at once.
-// Edit TARGET_JOB_QUERIES (comma-separated) in .env to add/remove roles.
+// Edit the "target_job_queries" field (comma-separated) in the Config node
+// to add/remove roles.
 
-const queries = ($env.TARGET_JOB_QUERIES || 'operations manager')
+const queries = ($('Config').first().json.target_job_queries || 'operations manager')
   .split(',')
   .map((q) => q.trim())
   .filter(Boolean);

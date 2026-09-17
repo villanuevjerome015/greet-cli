@@ -19,6 +19,31 @@
       }
     },
     {
+      "id": "config",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [130, -80],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "cfg-1", "name": "adzuna_app_id", "type": "string", "value": "PASTE_ADZUNA_APP_ID_HERE" },
+            { "id": "cfg-2", "name": "adzuna_app_key", "type": "string", "value": "PASTE_ADZUNA_APP_KEY_HERE" },
+            { "id": "cfg-3", "name": "adzuna_country", "type": "string", "value": "us" },
+            { "id": "cfg-4", "name": "rapidapi_key", "type": "string", "value": "PASTE_RAPIDAPI_KEY_HERE" },
+            { "id": "cfg-5", "name": "target_job_queries", "type": "string", "value": "operations manager,project manager,automation specialist" },
+            { "id": "cfg-6", "name": "target_job_location", "type": "string", "value": "Remote" },
+            { "id": "cfg-7", "name": "anthropic_api_key", "type": "string", "value": "PASTE_ANTHROPIC_API_KEY_HERE" },
+            { "id": "cfg-8", "name": "candidate_profile", "type": "string", "value": "PASTE_YOUR_FULL_CANDIDATE_PROFILE_HERE" },
+            { "id": "cfg-9", "name": "airtable_base_id", "type": "string", "value": "PASTE_AIRTABLE_BASE_ID_HERE" },
+            { "id": "cfg-10", "name": "airtable_applications_table", "type": "string", "value": "Applications" },
+            { "id": "cfg-11", "name": "slack_channel_id", "type": "string", "value": "PASTE_SLACK_CHANNEL_ID_HERE" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
       "id": "role-queries",
       "name": "Role Queries",
       "type": "n8n-nodes-base.code",
@@ -26,7 +51,7 @@
       "position": [150, 200],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// One item per role-family query, so Adzuna/JSearch each run once per\n// role instead of one query string trying to cover ops + PM + automation.\n// Edit TARGET_JOB_QUERIES (comma-separated) in .env to add/remove roles.\nconst queries = ($env.TARGET_JOB_QUERIES || 'operations manager')\n  .split(',')\n  .map((q) => q.trim())\n  .filter(Boolean);\n\nreturn queries.map((query) => ({ json: { query } }));"
+        "jsCode": "// One item per role-family query, so Adzuna/JSearch each run once per\n// role instead of one query string trying to cover ops + PM + automation.\n// Edit the \"target_job_queries\" field (comma-separated) in the Config node to add/remove roles.\nconst queries = ($('Config').first().json.target_job_queries || 'operations manager')\n  .split(',')\n  .map((q) => q.trim())\n  .filter(Boolean);\n\nreturn queries.map((query) => ({ json: { query } }));"
       }
     },
     {
@@ -37,14 +62,14 @@
       "position": [370, 100],
       "parameters": {
         "method": "GET",
-        "url": "=https://api.adzuna.com/v1/api/jobs/{{$env.ADZUNA_COUNTRY}}/search/1",
+        "url": "=https://api.adzuna.com/v1/api/jobs/{{$('Config').first().json.adzuna_country}}/search/1",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
-            { "name": "app_id", "value": "={{$env.ADZUNA_APP_ID}}" },
-            { "name": "app_key", "value": "={{$env.ADZUNA_APP_KEY}}" },
+            { "name": "app_id", "value": "={{$('Config').first().json.adzuna_app_id}}" },
+            { "name": "app_key", "value": "={{$('Config').first().json.adzuna_app_key}}" },
             { "name": "what", "value": "={{$json.query}}" },
-            { "name": "where", "value": "={{$env.TARGET_JOB_LOCATION}}" },
+            { "name": "where", "value": "={{$('Config').first().json.target_job_location}}" },
             { "name": "results_per_page", "value": "50" },
             { "name": "content-type", "value": "application/json" }
           ]
@@ -75,7 +100,7 @@
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
-            { "name": "query", "value": "={{$json.query + ' in ' + $env.TARGET_JOB_LOCATION}}" },
+            { "name": "query", "value": "={{$json.query + ' in ' + $('Config').first().json.target_job_location}}" },
             { "name": "page", "value": "1" },
             { "name": "num_pages", "value": "1" }
           ]
@@ -83,7 +108,7 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "X-RapidAPI-Key", "value": "={{$env.RAPIDAPI_KEY}}" },
+            { "name": "X-RapidAPI-Key", "value": "={{$('Config').first().json.rapidapi_key}}" },
             { "name": "X-RapidAPI-Host", "value": "jsearch.p.rapidapi.com" }
           ]
         },
@@ -165,12 +190,12 @@
         "base": {
           "__rl": true,
           "mode": "id",
-          "value": "={{$env.AIRTABLE_BASE_ID}}"
+          "value": "={{$('Config').first().json.airtable_base_id}}"
         },
         "table": {
           "__rl": true,
           "mode": "id",
-          "value": "={{$env.AIRTABLE_APPLICATIONS_TABLE}}"
+          "value": "={{$('Config').first().json.airtable_applications_table}}"
         },
         "options": {
           "fields": ["Job ID"]
@@ -206,14 +231,14 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "x-api-key", "value": "={{$env.ANTHROPIC_API_KEY}}" },
+            { "name": "x-api-key", "value": "={{$('Config').first().json.anthropic_api_key}}" },
             { "name": "anthropic-version", "value": "2023-06-01" },
             { "name": "content-type", "value": "application/json" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { model: \"claude-sonnet-5\", max_tokens: 300, system: \"You score how well a candidate fits a job posting, 0-100. Return ONLY compact JSON like {\\\"score\\\": 82, \\\"reason\\\": \\\"one sentence\\\"}. No markdown fencing, no extra text.\", messages: [ { role: \"user\", content: \"CANDIDATE PROFILE:\\n\" + $env.CANDIDATE_PROFILE + \"\\n\\nJOB TITLE: \" + $json.title + \"\\nCOMPANY: \" + $json.company + \"\\nJOB DESCRIPTION:\\n\" + ($json.description || \"\").slice(0, 4000) } ] } }}",
+        "jsonBody": "={{ { model: \"claude-sonnet-5\", max_tokens: 300, system: \"You score how well a candidate fits a job posting, 0-100. Return ONLY compact JSON like {\\\"score\\\": 82, \\\"reason\\\": \\\"one sentence\\\"}. No markdown fencing, no extra text.\", messages: [ { role: \"user\", content: \"CANDIDATE PROFILE:\\n\" + $('Config').first().json.candidate_profile + \"\\n\\nJOB TITLE: \" + $json.title + \"\\nCOMPANY: \" + $json.company + \"\\nJOB DESCRIPTION:\\n\" + ($json.description || \"\").slice(0, 4000) } ] } }}",
         "options": {}
       }
     },
@@ -267,14 +292,14 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "x-api-key", "value": "={{$env.ANTHROPIC_API_KEY}}" },
+            { "name": "x-api-key", "value": "={{$('Config').first().json.anthropic_api_key}}" },
             { "name": "anthropic-version", "value": "2023-06-01" },
             { "name": "content-type", "value": "application/json" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { model: \"claude-sonnet-5\", max_tokens: 500, system: \"You write cover letters. Direct, specific, no corporate filler. 200 words max. Never invent experience not in the candidate profile.\", messages: [ { role: \"user\", content: \"<candidate_profile>\" + $env.CANDIDATE_PROFILE + \"</candidate_profile>\\n<job_description>\" + ($json.description || \"\").slice(0, 4000) + \"</job_description>\\n<company>\" + $json.company + \"</company>\\n\\nExtract the 3 requirements this employer clearly cares most about.\\nMap each to specific evidence from the candidate profile.\\nIf a requirement has no honest match, do not address it.\\nOutput only the letter body.\" } ] } }}",
+        "jsonBody": "={{ { model: \"claude-sonnet-5\", max_tokens: 500, system: \"You write cover letters. Direct, specific, no corporate filler. 200 words max. Never invent experience not in the candidate profile.\", messages: [ { role: \"user\", content: \"<candidate_profile>\" + $('Config').first().json.candidate_profile + \"</candidate_profile>\\n<job_description>\" + ($json.description || \"\").slice(0, 4000) + \"</job_description>\\n<company>\" + $json.company + \"</company>\\n\\nExtract the 3 requirements this employer clearly cares most about.\\nMap each to specific evidence from the candidate profile.\\nIf a requirement has no honest match, do not address it.\\nOutput only the letter body.\" } ] } }}",
         "options": {}
       }
     },
@@ -321,12 +346,12 @@
         "base": {
           "__rl": true,
           "mode": "id",
-          "value": "={{$env.AIRTABLE_BASE_ID}}"
+          "value": "={{$('Config').first().json.airtable_base_id}}"
         },
         "table": {
           "__rl": true,
           "mode": "id",
-          "value": "={{$env.AIRTABLE_APPLICATIONS_TABLE}}"
+          "value": "={{$('Config').first().json.airtable_applications_table}}"
         },
         "columns": {
           "mappingMode": "defineBelow",
@@ -443,7 +468,7 @@
         "channelId": {
           "__rl": true,
           "mode": "id",
-          "value": "={{$env.SLACK_CHANNEL_ID}}"
+          "value": "={{$('Config').first().json.slack_channel_id}}"
         },
         "text": "={{$json.digest_text}}",
         "otherOptions": {}
@@ -474,6 +499,9 @@
   ],
   "connections": {
     "Schedule Trigger": {
+      "main": [[{ "node": "Config", "type": "main", "index": 0 }]]
+    },
+    "Config": {
       "main": [
         [
           { "node": "Role Queries", "type": "main", "index": 0 },
