@@ -15,12 +15,15 @@ the `candidate_profile` field on the workflow's **Config** node.
 Every 6 hours:
 1. Pulls job listings from four kinds of source — no browser automation, no
    LinkedIn/Indeed scraping:
-   - **Adzuna** and **JSearch (RapidAPI)**, each run once per entry in the
+   - **JSearch (RapidAPI)** and **Remotive**, each run once per entry in the
      Config node's `target_job_queries` field (e.g. ops, PM, automation),
      since neither API's query syntax handles real OR well enough to cover
      multiple role families in one call. (JSearch reads Google for Jobs, so
      LinkedIn/Indeed *listings* do surface here legitimately — you just
      apply on those sites yourself.)
+   - **RemoteOK**, which has no search parameter, so its whole recent feed is
+     fetched once per run and filtered against that same query list in the
+     `Extract: RemoteOK` node.
    - public **Greenhouse/Lever/Ashby** board endpoints for a list of target
      companies, set in the `Fetch ATS Jobs` node.
    - **employer careers pages** for companies with no supported ATS, set in
@@ -63,8 +66,8 @@ Every 6 hours:
    `Applications` table with a `Job ID` primary field. Do this first; the
    workflow's dedupe step depends on it existing (an empty table is fine).
 
-2. **Get API keys.**
-   - Adzuna: https://developer.adzuna.com/ (free, 1k calls/mo)
+2. **Get API keys.** Only two are needed — RemoteOK and Remotive are free
+   public APIs with no signup and no key.
    - JSearch: https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
    - Anthropic: https://console.anthropic.com/
 
@@ -94,7 +97,7 @@ Every 6 hours:
    fill in `TARGET_COMPANIES` with the Greenhouse/Lever/Ashby board slugs you
    want to watch (the slug is the URL segment in the company's public job
    board, e.g. `boards.greenhouse.io/stripe` → `stripe`). Leave it empty to
-   run on Adzuna + JSearch only.
+   run on the job-board sources only.
 
 7. **Optionally add careers pages.** For companies whose "Apply" link does
    *not* go to Greenhouse/Lever/Ashby, open the `Fetch Careers Pages` Code
@@ -103,6 +106,9 @@ Every 6 hours:
    `thesite.com/robots.txt` and their terms before adding, and never add a
    commercial job board (JobStreet, Indeed, LinkedIn and the like), which
    carries the same ToS and ban risk this project ruled out on day one.
+
+   Ships with one entry (`somewhere.com/jobs`) as a working example —
+   verify it still suits you and remove it if not.
 
    Two practical limits: pages that render their listings with JavaScript
    come back nearly empty from a plain fetch and get skipped, and each page

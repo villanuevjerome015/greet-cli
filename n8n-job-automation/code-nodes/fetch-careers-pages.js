@@ -14,6 +14,7 @@
 // it is the same ToS/ban risk this project ruled out on day one.
 
 const CAREERS_PAGES = [
+  { company: 'Somewhere', url: 'https://somewhere.com/jobs' },
   // { company: 'Example VA Agency', url: 'https://example.com/careers' },
 ];
 

@@ -3,14 +3,27 @@
 // Maps every source's raw shape into one flat schema:
 // { title, company, location, url, description, posted_at, source }
 
-function normalizeAdzuna(raw) {
+// Field names below follow each API's documented shape, with fallbacks so a
+// single renamed field doesn't blank out a whole listing.
+function normalizeRemoteOK(raw) {
+  return {
+    title: raw.position || raw.title || '',
+    company: raw.company || '',
+    location: raw.location || 'Remote',
+    url: raw.url || raw.apply_url || '',
+    description: raw.description || '',
+    posted_at: raw.date || '',
+  };
+}
+
+function normalizeRemotive(raw) {
   return {
     title: raw.title || '',
-    company: raw.company?.display_name || '',
-    location: raw.location?.display_name || '',
-    url: raw.redirect_url || '',
+    company: raw.company_name || raw.company || '',
+    location: raw.candidate_required_location || 'Remote',
+    url: raw.url || '',
     description: raw.description || '',
-    posted_at: raw.created || '',
+    posted_at: raw.publication_date || '',
   };
 }
 
@@ -83,8 +96,11 @@ for (const item of $input.all()) {
   let normalized;
 
   switch (source) {
-    case 'adzuna':
-      normalized = normalizeAdzuna(raw);
+    case 'remoteok':
+      normalized = normalizeRemoteOK(raw);
+      break;
+    case 'remotive':
+      normalized = normalizeRemotive(raw);
       break;
     case 'jsearch':
       normalized = normalizeJSearch(raw);

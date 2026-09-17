@@ -27,9 +27,6 @@
       "parameters": {
         "assignments": {
           "assignments": [
-            { "id": "cfg-1", "name": "adzuna_app_id", "type": "string", "value": "PASTE_ADZUNA_APP_ID_HERE" },
-            { "id": "cfg-2", "name": "adzuna_app_key", "type": "string", "value": "PASTE_ADZUNA_APP_KEY_HERE" },
-            { "id": "cfg-3", "name": "adzuna_country", "type": "string", "value": "us" },
             { "id": "cfg-4", "name": "rapidapi_key", "type": "string", "value": "PASTE_RAPIDAPI_KEY_HERE" },
             { "id": "cfg-5", "name": "target_job_queries", "type": "string", "value": "operations manager,project manager,automation specialist" },
             { "id": "cfg-6", "name": "target_job_location", "type": "string", "value": "Remote" },
@@ -51,41 +48,66 @@
       "position": [150, 200],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// One item per role-family query, so Adzuna/JSearch each run once per\n// role instead of one query string trying to cover ops + PM + automation.\n// Edit the \"target_job_queries\" field (comma-separated) in the Config node to add/remove roles.\nconst queries = ($('Config').first().json.target_job_queries || 'operations manager')\n  .split(',')\n  .map((q) => q.trim())\n  .filter(Boolean);\n\nreturn queries.map((query) => ({ json: { query } }));"
+        "jsCode": "// One item per role-family query, so JSearch/Remotive each run once per\n// role instead of one query string trying to cover ops + PM + automation.\n// Edit the \"target_job_queries\" field (comma-separated) in the Config node to add/remove roles.\nconst queries = ($('Config').first().json.target_job_queries || 'operations manager')\n  .split(',')\n  .map((q) => q.trim())\n  .filter(Boolean);\n\nreturn queries.map((query) => ({ json: { query } }));"
       }
     },
     {
-      "id": "adzuna-search",
-      "name": "Adzuna Search",
+      "id": "remoteok-search",
+      "name": "RemoteOK Search",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [370, 100],
       "parameters": {
         "method": "GET",
-        "url": "=https://api.adzuna.com/v1/api/jobs/{{$('Config').first().json.adzuna_country}}/search/1",
-        "sendQuery": true,
-        "queryParameters": {
+        "url": "https://remoteok.com/api",
+        "sendHeaders": true,
+        "headerParameters": {
           "parameters": [
-            { "name": "app_id", "value": "={{$('Config').first().json.adzuna_app_id}}" },
-            { "name": "app_key", "value": "={{$('Config').first().json.adzuna_app_key}}" },
-            { "name": "what", "value": "={{$json.query}}" },
-            { "name": "where", "value": "={{$('Config').first().json.target_job_location}}" },
-            { "name": "results_per_page", "value": "50" },
-            { "name": "content-type", "value": "application/json" }
+            { "name": "User-Agent", "value": "Mozilla/5.0 (compatible; JobWatcher/1.0)" }
           ]
         },
         "options": {}
       }
     },
     {
-      "id": "extract-adzuna",
-      "name": "Extract: Adzuna",
+      "id": "extract-remoteok",
+      "name": "Extract: RemoteOK",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [590, 100],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Runs once per role query (see \"Role Queries\"), so this must flatten\n// every input item's results, not just the first.\nconst output = [];\n\nfor (const item of $input.all()) {\n  const jobs = item.json.results || [];\n  for (const job of jobs) {\n    output.push({ json: { source: 'adzuna', raw: job } });\n  }\n}\n\nreturn output;"
+        "jsCode": "// RemoteOK's API takes no search parameter — it returns its whole recent\n// feed — so filter here against the same role queries the other sources\n// use. Without this, every listing would go on to cost an Anthropic call.\nconst queries = ($('Config').first().json.target_job_queries || '')\n  .split(',')\n  .map((q) => q.trim().toLowerCase())\n  .filter(Boolean);\n\n// n8n may split a top-level JSON array response into one item per element,\n// or hand back a single item holding the array. Handle both.\nconst rows = [];\nfor (const item of $input.all()) {\n  const j = item.json;\n  if (Array.isArray(j)) rows.push(...j);\n  else if (Array.isArray(j.data)) rows.push(...j.data);\n  else rows.push(j);\n}\n\nconst output = [];\n\nfor (const row of rows) {\n  // The feed's first element is RemoteOK's legal notice, not a job.\n  if (!row || row.legal || !(row.position || row.title)) continue;\n\n  const haystack = [row.position, row.title, row.company, (row.tags || []).join(' ')]\n    .filter(Boolean)\n    .join(' ')\n    .toLowerCase();\n\n  const matches =\n    queries.length === 0 ||\n    queries.some((q) => q.split(/\\s+/).every((word) => haystack.includes(word)));\n\n  if (!matches) continue;\n\n  output.push({ json: { source: 'remoteok', raw: row } });\n}\n\nreturn output;"
+      }
+    },
+    {
+      "id": "remotive-search",
+      "name": "Remotive Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [370, -180],
+      "parameters": {
+        "method": "GET",
+        "url": "https://remotive.com/api/remote-jobs",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "search", "value": "={{$json.query}}" },
+            { "name": "limit", "value": "50" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "extract-remotive",
+      "name": "Extract: Remotive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [590, -180],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Runs once per role query (see \"Role Queries\"), so flatten every input\n// item's jobs array, not just the first.\nconst output = [];\n\nfor (const item of $input.all()) {\n  const jobs = item.json.jobs || [];\n  for (const job of jobs) {\n    output.push({ json: { source: 'remotive', raw: job } });\n  }\n}\n\nreturn output;"
       }
     },
     {
@@ -145,7 +167,7 @@
       "position": [220, 680],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Employer careers pages to watch, for companies that don't use a\n// supported ATS. Add ONLY pages you have checked are OK to read\n// automatically: visit thesite.com/robots.txt and skim their terms for\n// \"automated\", \"scraping\", \"crawl\".\n//\n// Do NOT put large commercial job boards here (JobStreet, Indeed,\n// LinkedIn, etc.) — their terms ban automated collection and they run bot\n// detection, so it is the same ToS/ban risk this project ruled out on\n// day one.\nconst CAREERS_PAGES = [\n  // { company: 'Example VA Agency', url: 'https://example.com/careers' },\n];\n\nconst results = [];\n\nfor (const page of CAREERS_PAGES) {\n  let html;\n  try {\n    html = await this.helpers.httpRequest({\n      method: 'GET',\n      url: page.url,\n      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobWatcher/1.0)' },\n      ignoreHttpStatusErrors: true,\n    });\n  } catch (err) {\n    continue;\n  }\n\n  if (typeof html !== 'string' || !html.trim()) continue;\n\n  const text = html\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/\\s+/g, ' ')\n    .trim()\n    .slice(0, 6000);\n\n  // Too little text usually means the listings are rendered by JavaScript,\n  // which a plain fetch can't see. Skip rather than send junk to the model.\n  if (text.length < 100) continue;\n\n  results.push({ json: { company: page.company, url: page.url, page_text: text } });\n}\n\nreturn results;"
+        "jsCode": "// Employer careers pages to watch, for companies that don't use a\n// supported ATS. Add ONLY pages you have checked are OK to read\n// automatically: visit thesite.com/robots.txt and skim their terms for\n// \"automated\", \"scraping\", \"crawl\".\n//\n// Do NOT put large commercial job boards here (JobStreet, Indeed,\n// LinkedIn, etc.) — their terms ban automated collection and they run bot\n// detection, so it is the same ToS/ban risk this project ruled out on\n// day one.\nconst CAREERS_PAGES = [\n  { company: 'Somewhere', url: 'https://somewhere.com/jobs' },\n  // { company: 'Example VA Agency', url: 'https://example.com/careers' },\n];\n\nconst results = [];\n\nfor (const page of CAREERS_PAGES) {\n  let html;\n  try {\n    html = await this.helpers.httpRequest({\n      method: 'GET',\n      url: page.url,\n      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobWatcher/1.0)' },\n      ignoreHttpStatusErrors: true,\n    });\n  } catch (err) {\n    continue;\n  }\n\n  if (typeof html !== 'string' || !html.trim()) continue;\n\n  const text = html\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/\\s+/g, ' ')\n    .trim()\n    .slice(0, 6000);\n\n  // Too little text usually means the listings are rendered by JavaScript,\n  // which a plain fetch can't see. Skip rather than send junk to the model.\n  if (text.length < 100) continue;\n\n  results.push({ json: { company: page.company, url: page.url, page_text: text } });\n}\n\nreturn results;"
       }
     },
     {
@@ -187,7 +209,7 @@
       "name": "Merge Sources 1",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
-      "position": [660, 200],
+      "position": [780, 200],
       "parameters": {
         "mode": "append"
       }
@@ -197,7 +219,7 @@
       "name": "Merge Sources 2",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
-      "position": [880, 350],
+      "position": [860, 40],
       "parameters": {
         "mode": "append"
       }
@@ -207,7 +229,17 @@
       "name": "Merge Sources 3",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
-      "position": [990, 520],
+      "position": [940, 350],
+      "parameters": {
+        "mode": "append"
+      }
+    },
+    {
+      "id": "merge-sources-4",
+      "name": "Merge Sources 4",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1020, 520],
       "parameters": {
         "mode": "append"
       }
@@ -220,7 +252,7 @@
       "position": [1100, 350],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "function normalizeAdzuna(raw) {\n  return {\n    title: raw.title || '',\n    company: raw.company?.display_name || '',\n    location: raw.location?.display_name || '',\n    url: raw.redirect_url || '',\n    description: raw.description || '',\n    posted_at: raw.created || '',\n  };\n}\n\nfunction normalizeJSearch(raw) {\n  const location = [raw.job_city, raw.job_state, raw.job_country].filter(Boolean).join(', ');\n  return {\n    title: raw.job_title || '',\n    company: raw.employer_name || '',\n    location: location || (raw.job_is_remote ? 'Remote' : ''),\n    url: raw.job_apply_link || raw.job_google_link || '',\n    description: raw.job_description || '',\n    posted_at: raw.job_posted_at_datetime_utc || '',\n  };\n}\n\nfunction normalizeGreenhouse(raw, company) {\n  return {\n    title: raw.title || '',\n    company,\n    location: raw.location?.name || '',\n    url: raw.absolute_url || '',\n    description: raw.content || '',\n    posted_at: raw.updated_at || '',\n  };\n}\n\nfunction normalizeLever(raw, company) {\n  return {\n    title: raw.text || '',\n    company,\n    location: raw.categories?.location || '',\n    url: raw.hostedUrl || '',\n    description: raw.descriptionPlain || raw.description || '',\n    posted_at: raw.createdAt ? new Date(Number(raw.createdAt)).toISOString() : '',\n  };\n}\n\nfunction normalizeAshby(raw, company) {\n  return {\n    title: raw.title || '',\n    company,\n    location: raw.location || '',\n    url: raw.jobUrl || raw.applyUrl || '',\n    description: raw.descriptionPlain || raw.description || '',\n    posted_at: raw.publishedAt || '',\n  };\n}\n\n// Careers-page jobs arrive already extracted by the model, so this is a\n// pass-through. posted_at is left blank — careers pages rarely state it.\nfunction normalizeCareersPage(raw, company) {\n  return {\n    title: raw.title || '',\n    company,\n    location: raw.location || '',\n    url: raw.url || '',\n    description: raw.description || '',\n    posted_at: '',\n  };\n}\n\nconst output = [];\n\nfor (const item of $input.all()) {\n  const { source, company, raw } = item.json;\n  let normalized;\n\n  switch (source) {\n    case 'adzuna': normalized = normalizeAdzuna(raw); break;\n    case 'jsearch': normalized = normalizeJSearch(raw); break;\n    case 'greenhouse': normalized = normalizeGreenhouse(raw, company); break;\n    case 'lever': normalized = normalizeLever(raw, company); break;\n    case 'ashby': normalized = normalizeAshby(raw, company); break;\n    case 'careers_page': normalized = normalizeCareersPage(raw, company); break;\n    default: continue;\n  }\n\n  if (!normalized.title || !normalized.company || !normalized.url) continue;\n\n  output.push({ json: { ...normalized, source } });\n}\n\nreturn output;"
+        "jsCode": "// Field names below follow each API's documented shape, with fallbacks so a\n// single renamed field doesn't blank out a whole listing.\nfunction normalizeRemoteOK(raw) {\n  return {\n    title: raw.position || raw.title || '',\n    company: raw.company || '',\n    location: raw.location || 'Remote',\n    url: raw.url || raw.apply_url || '',\n    description: raw.description || '',\n    posted_at: raw.date || '',\n  };\n}\n\nfunction normalizeRemotive(raw) {\n  return {\n    title: raw.title || '',\n    company: raw.company_name || raw.company || '',\n    location: raw.candidate_required_location || 'Remote',\n    url: raw.url || '',\n    description: raw.description || '',\n    posted_at: raw.publication_date || '',\n  };\n}\n\nfunction normalizeJSearch(raw) {\n  const location = [raw.job_city, raw.job_state, raw.job_country].filter(Boolean).join(', ');\n  return {\n    title: raw.job_title || '',\n    company: raw.employer_name || '',\n    location: location || (raw.job_is_remote ? 'Remote' : ''),\n    url: raw.job_apply_link || raw.job_google_link || '',\n    description: raw.job_description || '',\n    posted_at: raw.job_posted_at_datetime_utc || '',\n  };\n}\n\nfunction normalizeGreenhouse(raw, company) {\n  return {\n    title: raw.title || '',\n    company,\n    location: raw.location?.name || '',\n    url: raw.absolute_url || '',\n    description: raw.content || '',\n    posted_at: raw.updated_at || '',\n  };\n}\n\nfunction normalizeLever(raw, company) {\n  return {\n    title: raw.text || '',\n    company,\n    location: raw.categories?.location || '',\n    url: raw.hostedUrl || '',\n    description: raw.descriptionPlain || raw.description || '',\n    posted_at: raw.createdAt ? new Date(Number(raw.createdAt)).toISOString() : '',\n  };\n}\n\nfunction normalizeAshby(raw, company) {\n  return {\n    title: raw.title || '',\n    company,\n    location: raw.location || '',\n    url: raw.jobUrl || raw.applyUrl || '',\n    description: raw.descriptionPlain || raw.description || '',\n    posted_at: raw.publishedAt || '',\n  };\n}\n\n// Careers-page jobs arrive already extracted by the model, so this is a\n// pass-through. posted_at is left blank — careers pages rarely state it.\nfunction normalizeCareersPage(raw, company) {\n  return {\n    title: raw.title || '',\n    company,\n    location: raw.location || '',\n    url: raw.url || '',\n    description: raw.description || '',\n    posted_at: '',\n  };\n}\n\nconst output = [];\n\nfor (const item of $input.all()) {\n  const { source, company, raw } = item.json;\n  let normalized;\n\n  switch (source) {\n    case 'remoteok': normalized = normalizeRemoteOK(raw); break;\n    case 'remotive': normalized = normalizeRemotive(raw); break;\n    case 'jsearch': normalized = normalizeJSearch(raw); break;\n    case 'greenhouse': normalized = normalizeGreenhouse(raw, company); break;\n    case 'lever': normalized = normalizeLever(raw, company); break;\n    case 'ashby': normalized = normalizeAshby(raw, company); break;\n    case 'careers_page': normalized = normalizeCareersPage(raw, company); break;\n    default: continue;\n  }\n\n  if (!normalized.title || !normalized.company || !normalized.url) continue;\n\n  output.push({ json: { ...normalized, source } });\n}\n\nreturn output;"
       }
     },
     {
@@ -560,6 +592,7 @@
       "main": [
         [
           { "node": "Role Queries", "type": "main", "index": 0 },
+          { "node": "RemoteOK Search", "type": "main", "index": 0 },
           { "node": "Fetch ATS Jobs", "type": "main", "index": 0 },
           { "node": "Fetch Careers Pages", "type": "main", "index": 0 }
         ]
@@ -572,38 +605,47 @@
       "main": [[{ "node": "Parse Extracted Jobs", "type": "main", "index": 0 }]]
     },
     "Parse Extracted Jobs": {
-      "main": [[{ "node": "Merge Sources 3", "type": "main", "index": 1 }]]
+      "main": [[{ "node": "Merge Sources 4", "type": "main", "index": 1 }]]
     },
     "Role Queries": {
       "main": [
         [
-          { "node": "Adzuna Search", "type": "main", "index": 0 },
-          { "node": "JSearch Search", "type": "main", "index": 0 }
+          { "node": "JSearch Search", "type": "main", "index": 0 },
+          { "node": "Remotive Search", "type": "main", "index": 0 }
         ]
       ]
-    },
-    "Adzuna Search": {
-      "main": [[{ "node": "Extract: Adzuna", "type": "main", "index": 0 }]]
-    },
-    "Extract: Adzuna": {
-      "main": [[{ "node": "Merge Sources 1", "type": "main", "index": 0 }]]
     },
     "JSearch Search": {
       "main": [[{ "node": "Extract: JSearch", "type": "main", "index": 0 }]]
     },
     "Extract: JSearch": {
+      "main": [[{ "node": "Merge Sources 1", "type": "main", "index": 0 }]]
+    },
+    "RemoteOK Search": {
+      "main": [[{ "node": "Extract: RemoteOK", "type": "main", "index": 0 }]]
+    },
+    "Extract: RemoteOK": {
       "main": [[{ "node": "Merge Sources 1", "type": "main", "index": 1 }]]
+    },
+    "Remotive Search": {
+      "main": [[{ "node": "Extract: Remotive", "type": "main", "index": 0 }]]
+    },
+    "Extract: Remotive": {
+      "main": [[{ "node": "Merge Sources 2", "type": "main", "index": 1 }]]
     },
     "Merge Sources 1": {
       "main": [[{ "node": "Merge Sources 2", "type": "main", "index": 0 }]]
     },
-    "Fetch ATS Jobs": {
-      "main": [[{ "node": "Merge Sources 2", "type": "main", "index": 1 }]]
-    },
     "Merge Sources 2": {
       "main": [[{ "node": "Merge Sources 3", "type": "main", "index": 0 }]]
     },
+    "Fetch ATS Jobs": {
+      "main": [[{ "node": "Merge Sources 3", "type": "main", "index": 1 }]]
+    },
     "Merge Sources 3": {
+      "main": [[{ "node": "Merge Sources 4", "type": "main", "index": 0 }]]
+    },
+    "Merge Sources 4": {
       "main": [[{ "node": "Normalize Jobs", "type": "main", "index": 0 }]]
     },
     "Normalize Jobs": {
